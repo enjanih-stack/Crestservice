@@ -1,0 +1,183 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Debug bypass for primary admin
+    match /{allPaths=**} {
+      allow read, write: if request.auth != null && 
+        (request.auth.token.email.lower().matches(".*enjanih.*") || 
+         request.auth.token.email.lower().matches(".*crestechnology.*") ||
+         request.auth.token.email.lower().matches(".*crestiton.*"));
+    }
+
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: inquiries
+    // Document ID: auto-generated
+    // Fields:
+    //   - name: string (required, 1-100 chars)
+    //   - product: string (required, 1-100 chars)
+    //   - company: string (optional)
+    //   - location: string (optional)
+    //   - email: string (optional)
+    //   - phone: string (optional)
+    //   - subService: string (optional)
+    //   - status: string (optional)
+    //   - message: string (optional, 0-2000 chars)
+    //   - fileUrl: string (optional)
+    //   - fileName: string (optional)
+    //   - tenantInfo: map (optional)
+    //   - createdAt: timestamp (required)
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && 
+        (
+          ('email' in request.auth.token && (
+            request.auth.token.email.lower() in ["enjanih@gmail.com", "enjanih@googlemail.com", "crestechnologiesltd@gmail.com", "crestechnologisltd@gmail.com", "crestiton@gmail.com", "crestechnologies@outlook.com"] ||
+            request.auth.token.email.lower().matches(".*enjanih.*") ||
+            request.auth.token.email.lower().matches(".*crestechnology.*") ||
+            request.auth.token.email.lower().matches(".*crestiton.*")
+          )) ||
+          (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin')
+        );
+    }
+
+    function isInternalStaff() {
+      return isAuthenticated() && 'email' in request.auth.token &&
+        (request.auth.token.email.lower().matches(".*enjanih.*") || 
+         request.auth.token.email.lower().matches(".*crestechnology.*") ||
+         request.auth.token.email.lower().matches(".*crestiton.*"));
+    }
+
+    function isValidRentalRecord(data) {
+      return data.unit is string && data.unit.size() > 0 && 
+             data.tenant is string && data.tenant.size() > 0 &&
+             data.amount is number &&
+             data.createdAt is timestamp;
+    }
+
+    function isValidInquiry(data) {
+      return data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
+             data.product is string && data.product.size() > 0 && data.product.size() <= 100 &&
+             (!('company' in data) || (data.company is string && data.company.size() <= 200)) &&
+             (!('location' in data) || (data.location is string && data.location.size() <= 500)) &&
+             (!('email' in data) || (data.email is string && data.email.size() <= 200)) &&
+             (!('phone' in data) || (data.phone is string && data.phone.size() <= 50)) &&
+             (!('message' in data) || (data.message is string && data.message.size() <= 2000)) &&
+             (!('subService' in data) || (data.subService is string && data.subService.size() <= 500)) &&
+             (!('status' in data) || (data.status in ['New', 'In Progress', 'Completed'])) &&
+             (!('fileUrl' in data) || (data.fileUrl is string && data.fileUrl.size() <= 1000)) &&
+             (!('fileName' in data) || (data.fileName is string && data.fileName.size() <= 255)) &&
+             (!('userId' in data) || (data.userId == null || data.userId is string)) &&
+             (!('userEmail' in data) || (data.userEmail == null || data.userEmail is string)) &&
+             (!('assignedTo' in data) || (data.assignedTo is string)) &&
+             (!('assignedToName' in data) || (data.assignedToName is string)) &&
+             (!('tenantInfo' in data) || (data.tenantInfo is map)) &&
+             (!('waterHygieneInfo' in data) || (data.waterHygieneInfo is map)) &&
+             (!('needAccountInfo' in data) || (data.needAccountInfo is bool)) &&
+             data.createdAt is timestamp;
+    }
+
+    function isValidFeedback(data) {
+      return (!('name' in data) || (data.name is string && data.name.size() <= 100)) &&
+             (!('email' in data) || (data.email is string && data.email.size() <= 200)) &&
+             data.rating is number && data.rating >= 1 && data.rating <= 5 &&
+             data.comment is string && data.comment.size() > 0 && data.comment.size() <= 2000 &&
+             data.createdAt is timestamp;
+    }
+
+    function isValidStatsUpdate(newData, oldData) {
+      // Allow only views, interactions and siteVisits to be incremented
+      let affectedKeys = newData.diff(oldData).affectedKeys();
+      return affectedKeys.hasOnly(['views', 'interactions', 'siteVisits']) &&
+             (!('views' in newData) || (newData.views is number && newData.views >= oldData.views)) &&
+             (!('interactions' in newData) || (newData.interactions is number && newData.interactions >= oldData.interactions)) &&
+             (!('siteVisits' in newData) || (newData.siteVisits is number && newData.siteVisits >= oldData.siteVisits));
+    }
+
+    function isValidUser(data) {
+      return (!('displayName' in data) || (data.displayName is string && data.displayName.size() <= 100)) &&
+             (!('email' in data) || (data.email is string && data.email.size() <= 200)) &&
+             (!('phoneNumber' in data) || (data.phoneNumber is string && data.phoneNumber.size() <= 50)) &&
+             (!('photoURL' in data) || (data.photoURL is string && data.photoURL.size() <= 1000)) &&
+             (!('address' in data) || (data.address is string && data.address.size() <= 500)) &&
+             (!('bio' in data) || (data.bio is string && data.bio.size() <= 2000)) &&
+             (!('role' in data) || (data.role in ['admin', 'user'])) &&
+             (!('updatedAt' in data) || (data.updatedAt is timestamp));
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /inquiries/{inquiryId} {
+      // Anyone can submit an inquiry
+      allow create: if isValidInquiry(request.resource.data);
+      
+      // Only admins can read, update, or delete inquiries
+      allow read, update, delete: if isAdmin();
+    }
+
+    match /users/{userId} {
+      // Users can only read/write their own profile, admins can read all
+      allow read: if (isAuthenticated() && request.auth.uid == userId) || isAdmin();
+      allow create, update: if isAuthenticated() && request.auth.uid == userId && 
+        isValidUser(request.resource.data) &&
+        (
+          !('role' in request.resource.data) || 
+          request.resource.data.role == 'user' ||
+          isAdmin() ||
+          isInternalStaff()
+        );
+    }
+
+    match /rentalRecords/{recordId} {
+      // Only admins can manage rental records
+      allow read: if isAdmin();
+      allow create: if isAdmin() && isValidRentalRecord(request.resource.data);
+      allow update: if isAdmin() && isValidRentalRecord(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /availableProperties/{propertyId} {
+      // Anyone can view available properties
+      allow read: if true;
+      // Only admins can manage available properties
+      allow write: if isAdmin();
+    }
+
+    match /advertisements/{advertId} {
+      // Anyone can view active advertisements
+      allow read: if true;
+      // Only admins can manage advertisements
+      allow write: if isAdmin();
+    }
+
+    match /feedbacks/{feedbackId} {
+      // Anyone can submit feedback and read public reviews
+      allow create: if isValidFeedback(request.resource.data);
+      allow read: if true;
+      // Only admins can delete/update feedback
+      allow update, delete: if isAdmin();
+    }
+
+    match /siteStats/{statsId} {
+      // Anyone can read stats and increment them
+      allow read: if true;
+      allow create: if statsId == 'counters' && request.resource.data.keys().hasAll(['views', 'interactions', 'siteVisits']);
+      allow update: if isValidStatsUpdate(request.resource.data, resource.data);
+    }
+  }
+}

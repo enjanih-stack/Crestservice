@@ -1,0 +1,253 @@
+{
+  "entities": {
+    "Inquiry": {
+      "title": "Inquiry",
+      "description": "A service inquiry from a customer",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "The full name of the enquirer"
+        },
+        "company": {
+          "type": "string",
+          "description": "The company name of the enquirer"
+        },
+        "location": {
+          "type": "string",
+          "description": "The project or site location"
+        },
+        "email": {
+          "type": "string",
+          "description": "The contact email address of the enquirer"
+        },
+        "phone": {
+          "type": "string",
+          "description": "The phone contact of the enquirer"
+        },
+        "product": {
+          "type": "string",
+          "description": "The service or product of interest"
+        },
+        "subService": {
+          "type": "string",
+          "description": "Specialized facility service selected"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["New", "In Progress", "Completed"],
+          "description": "The current status of the inquiry"
+        },
+        "message": {
+          "type": "string",
+          "description": "The project scope or message"
+        },
+        "summary": {
+          "type": "string",
+          "description": "AI-generated summary of the message"
+        },
+        "fileUrl": {
+          "type": "string",
+          "description": "URL to the uploaded attachment"
+        },
+        "fileName": {
+          "type": "string",
+          "description": "Name of the uploaded attachment"
+        },
+        "userId": {
+          "type": "string",
+          "description": "UID of the logged-in user who submitted the inquiry"
+        },
+        "userEmail": {
+          "type": "string",
+          "description": "Email of the logged-in user who submitted the inquiry"
+        },
+        "assignedTo": {
+          "type": "string",
+          "description": "UID of the user assigned to this inquiry"
+        },
+        "assignedToName": {
+          "type": "string",
+          "description": "Name of the user assigned to this inquiry"
+        },
+        "tenantInfo": {
+          "type": "object",
+          "description": "Pre-rental questionnaire data for property rental inquiries",
+          "properties": {
+            "propertyAddress": { "type": "string" },
+            "currentAddress": { "type": "string" },
+            "maritalStatus": { "type": "string" },
+            "occupation": { "type": "string" },
+            "employerName": { "type": "string" },
+            "employerAddress": { "type": "string" },
+            "stateOfOrigin": { "type": "string" },
+            "lga": { "type": "string" },
+            "relocationReason": { "type": "string" },
+            "hasBeenEvicted": { "type": "string" },
+            "evictionDetails": { "type": "string" },
+            "intendedUse": { "type": "string" },
+            "plannedMoveInDate": { "type": "string" },
+            "currentLandlordName": { "type": "string" },
+            "currentLandlordAddress": { "type": "string" },
+            "currentLandlordPhone": { "type": "string" },
+            "currentLandlordEmail": { "type": "string" },
+            "referralSource": { "type": "string" },
+            "hasPets": { "type": "string" },
+            "apartmentsInterested": { "type": "string" },
+            "familySize": { "type": "string" },
+            "dailySchedule": { "type": "string" },
+            "lateHours": { "type": "string" },
+            "hostMeetings": { "type": "string" },
+            "livingExperience": { "type": "string" },
+            "noisyNeighbors": { "type": "string" },
+            "maintenanceRating": { "type": "string" },
+            "selfDescription": { "type": "string" },
+            "referee1": { "type": "object" },
+            "referee2": { "type": "object" }
+          }
+        },
+        "waterHygieneInfo": {
+          "type": "object",
+          "description": "Specific data for water hygiene and care requests",
+          "properties": {
+            "sourcing": { "type": "string" },
+            "treatment": { "type": "string" },
+            "wastewater": { "type": "string" },
+            "results": { "type": "string", "description": "Physical, analytical or laboratory results" },
+            "siteVisitCount": { "type": "number" }
+          }
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the inquiry was submitted"
+        }
+      },
+      "required": ["name", "product", "createdAt"]
+    },
+    "RentalRecord": {
+      "title": "Rental Record",
+      "description": "A record of a tenant and their property rental details",
+      "type": "object",
+      "properties": {
+        "unit": { "type": "string", "description": "Property & Location" },
+        "tenant": { "type": "string", "description": "Full Tenant Name" },
+        "email": { "type": "string", "format": "email", "description": "Tenant Email Address" },
+        "amount": { "type": "number", "description": "Rent Amount" },
+        "start": { "type": "string", "description": "Tenancy Start Date" },
+        "expiry": { "type": "string", "description": "Tenancy Expiry Date" },
+        "notes": { "type": "string", "description": "Additional notes" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "lastExpiryNotificationSent": { "type": "string", "format": "date-time" }
+      },
+      "required": ["unit", "tenant", "amount"]
+    },
+    "AvailableProperty": {
+      "title": "Available Property",
+      "description": "A property available for rent",
+      "type": "object",
+      "properties": {
+        "address": { "type": "string" },
+        "rent": { "type": "number" },
+        "unitType": { "type": "string" },
+        "description": { "type": "string" },
+        "images": { "type": "array", "items": { "type": "string" } },
+        "features": { "type": "array", "items": { "type": "string" } },
+        "isAvailable": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["address", "rent", "unitType"]
+    },
+    "Advertisement": {
+      "title": "Advertisement",
+      "description": "A rolling advertisement banner item",
+      "type": "object",
+      "properties": {
+        "type": { 
+          "type": "string", 
+          "enum": ["Vacant Property", "Equipment Sale", "Property for Sale"],
+          "description": "The category of the advertisement"
+        },
+        "content": { "type": "string", "description": "The text content of the advert" },
+        "status": { 
+          "type": "string", 
+          "enum": ["Active", "Paused"],
+          "description": "Current status of the advert"
+        },
+        "lastActionDate": { "type": "string", "format": "date-time", "description": "Date of last renewal or action" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "lastWarningSent": { "type": "string", "format": "date-time" },
+        "lastPauseSent": { "type": "string", "format": "date-time" }
+      },
+      "required": ["type", "content", "status", "lastActionDate", "createdAt"]
+    },
+    "User": {
+      "title": "User",
+      "description": "A user profile record",
+      "type": "object",
+      "properties": {
+        "displayName": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "phoneNumber": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "address": { "type": "string" },
+        "bio": { "type": "string" },
+        "role": { "type": "string", "enum": ["admin", "user"] },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "Feedback": {
+      "title": "Feedback",
+      "description": "Customer feedback and reviews",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "rating": { "type": "number" },
+        "comment": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["rating", "comment", "createdAt"]
+    },
+    "SiteStats": {
+      "title": "Site Stats",
+      "description": "Website view, interaction and visit counters",
+      "type": "object",
+      "properties": {
+        "views": { "type": "number" },
+        "interactions": { "type": "number" },
+        "siteVisits": { "type": "number" }
+      }
+    }
+  },
+  "firestore": {
+    "/inquiries/{inquiryId}": {
+      "schema": "Inquiry",
+      "description": "Collection of customer inquiries including water hygiene data"
+    },
+    "/rentalRecords/{recordId}": {
+      "schema": "RentalRecord",
+      "description": "Collection of tenant rental records"
+    },
+    "/availableProperties/{propertyId}": {
+      "schema": "AvailableProperty",
+      "description": "Collection of properties available for rent"
+    },
+    "/advertisements/{advertId}": {
+      "schema": "Advertisement",
+      "description": "Collection of rolling advertisements"
+    },
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "Collection of user profiles"
+    },
+    "/feedbacks/{feedbackId}": {
+      "schema": "Feedback",
+      "description": "Collection of customer feedback"
+    },
+    "/siteStats/{statsId}": {
+      "schema": "SiteStats",
+      "description": "Collection for site statistics"
+    }
+  }
+}
