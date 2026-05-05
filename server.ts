@@ -20,16 +20,32 @@ try {
   const firebaseConfig = JSON.parse(fs.readFileSync("./firebase-applet-config.json", "utf-8"));
   console.log("[SERVER] Config values - Project:", firebaseConfig.projectId, "Database:", firebaseConfig.firestoreDatabaseId);
 
-  // Try initializing with config project first, as it might be a linked project
+  // Initialize Admin SDK
   if (getApps().length === 0) {
-    try {
-      console.log("[SERVER] Attempting initialization with config projectId...");
-      initializeApp({
-        projectId: firebaseConfig.projectId
-      });
-    } catch (initErr) {
-      console.warn("[SERVER] Failed to initialize with config projectId, falling back to default:", initErr);
-      initializeApp();
+    const serviceAccountVar = process.env.FIREBASE_SERVICE_ACCOUNT;
+    
+    if (serviceAccountVar) {
+      try {
+        console.log("[SERVER] Initializing with FIREBASE_SERVICE_ACCOUNT environment variable...");
+        const serviceAccount = JSON.parse(serviceAccountVar);
+        initializeApp({
+          credential: admin.credential.cert(serviceAccount),
+          projectId: firebaseConfig.projectId
+        });
+      } catch (parseErr) {
+        console.error("[SERVER] Failed to parse FIREBASE_SERVICE_ACCOUNT JSON:", parseErr);
+        initializeApp({ projectId: firebaseConfig.projectId });
+      }
+    } else {
+      try {
+        console.log("[SERVER] Attempting initialization with config projectId...");
+        initializeApp({
+          projectId: firebaseConfig.projectId
+        });
+      } catch (initErr) {
+        console.warn("[SERVER] Failed to initialize with config projectId, falling back to ambient default:", initErr);
+        initializeApp();
+      }
     }
   }
   
@@ -37,8 +53,6 @@ try {
   console.log("[SERVER] Using Project ID:", app.options.projectId || "Ambient Default");
 
   // Determine database ID
-  // If the explicit ID fails with PERMISSION_DENIED, we might want to try (default)
-  // but let's try the configured one first as it's specifically set.
   const databaseId = firebaseConfig.firestoreDatabaseId || "(default)";
   console.log("[SERVER] Using Database ID:", databaseId);
 
@@ -143,7 +157,7 @@ async function runCheck(targetDb: any) {
 async function startServer() {
   console.log("[SERVER] Starting server initialization...");
   const app = express();
-  const PORT = 3000;
+  const PORT = Number(process.env.PORT) || 3000;
 
   app.use(express.json());
 
