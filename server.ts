@@ -2,6 +2,7 @@ import express from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
 import { fileURLToPath } from "url";
+import "dotenv/config";
 
 console.log("[SERVER] server.ts is being executed...");
 import { initializeApp, getApps, getApp } from "firebase-admin/app";
@@ -17,7 +18,8 @@ const __dirname = path.dirname(__filename);
 let db: any;
 try {
   console.log("[SERVER] Initializing Firebase Admin...");
-  const firebaseConfig = JSON.parse(fs.readFileSync("./firebase-applet-config.json", "utf-8"));
+  const configPath = path.join(process.cwd(), "firebase-applet-config.json");
+  const firebaseConfig = JSON.parse(fs.readFileSync(configPath, "utf-8"));
   console.log("[SERVER] Config values - Project:", firebaseConfig.projectId, "Database:", firebaseConfig.firestoreDatabaseId);
 
   // Initialize Admin SDK
@@ -27,13 +29,16 @@ try {
     if (serviceAccountVar) {
       try {
         console.log("[SERVER] Initializing with FIREBASE_SERVICE_ACCOUNT environment variable...");
-        const serviceAccount = JSON.parse(serviceAccountVar);
+        // Handle potential escaping issues with JSON in env vars
+        const cleanedJson = serviceAccountVar.trim().replace(/\\n/g, '\n');
+        const serviceAccount = JSON.parse(cleanedJson);
         initializeApp({
           credential: admin.credential.cert(serviceAccount),
           projectId: firebaseConfig.projectId
         });
       } catch (parseErr) {
         console.error("[SERVER] Failed to parse FIREBASE_SERVICE_ACCOUNT JSON:", parseErr);
+        // Fallback to basic init
         initializeApp({ projectId: firebaseConfig.projectId });
       }
     } else {
@@ -78,7 +83,8 @@ async function checkTenancyExpirations() {
     return;
   }
   
-  const firebaseConfig = JSON.parse(fs.readFileSync("./firebase-applet-config.json", "utf-8"));
+  const configPath = path.join(process.cwd(), "firebase-applet-config.json");
+  const firebaseConfig = JSON.parse(fs.readFileSync(configPath, "utf-8"));
   
   let currentDb = db;
   try {
