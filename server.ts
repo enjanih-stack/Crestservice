@@ -18,7 +18,7 @@ const __dirname = path.dirname(__filename);
 let db: any;
 try {
   console.log("[SERVER] Initializing Firebase Admin...");
-  const configPath = path.join(process.cwd(), "firebase-applet-config.json");
+  const configPath = path.resolve(__dirname, "firebase-applet-config.json");
   const firebaseConfig = JSON.parse(fs.readFileSync(configPath, "utf-8"));
   console.log("[SERVER] Config values - Project:", firebaseConfig.projectId, "Database:", firebaseConfig.firestoreDatabaseId);
 
@@ -167,6 +167,15 @@ async function startServer() {
 
   app.use(express.json());
 
+  // Health check endpoint
+  app.get("/api/health", (req, res) => {
+    res.json({ 
+      status: "ok", 
+      env: process.env.NODE_ENV,
+      time: new Date().toISOString()
+    });
+  });
+
   // Run expiration check every 12 hours
   setInterval(checkTenancyExpirations, 12 * 60 * 60 * 1000);
 
@@ -211,12 +220,37 @@ async function startServer() {
       console.error("[SERVER] Failed to initialize Vite middleware:", viteError);
     }
   } else {
-    console.log("[SERVER] Serving production build...");
-    const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
-    app.get('*', (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
-    });
+    console.log(`[SERVER] Production mode detected. (NODE_ENV=${process.env.NODE_ENV})`);
+    const distPath = path.resolve(__dirname, 'dist');
+    
+    if (fs.existsSync(distPath)) {
+      console.log(`[SERVER] dist directory found at: ${distPath}`);
+      // Serve static files with a fallback to index.html for SPA routes
+      app.use(express.static(distPath, {
+        index: false // Disable serving index.html automatically to handle it manually below
+      }));
+
+      // Explicitly serve assets to ensure they don't fall back to index.html if missing
+      app.use('/assets', (req, res) => {
+        res.status(404).send('Asset not found');
+      });
+
+      app.get('*', (req, res) => {
+        console.log(`[SERVER] Routing request for ${req.url} to index.html`);
+        const indexPath = path.join(distPath, 'index.html');
+        if (fs.existsSync(indexPath)) {
+          res.sendFile(indexPath);
+        } else {
+          console.error(`[SERVER] index.html NOT FOUND at ${indexPath}`);
+          res.status(500).send('Application build missing index.html');
+        }
+      });
+    } else {
+      console.error(`[SERVER] dist directory NOT FOUND at ${distPath}. Did you run 'npm run build'?`);
+      app.get('*', (req, res) => {
+        res.status(500).send('Production build missing. Please run build process.');
+      });
+    }
   }
 
   app.listen(PORT, "0.0.0.0", () => {
