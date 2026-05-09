@@ -145,6 +145,7 @@ async function checkTenancyExpirations() {
 
 async function runCheck(targetDb: any) {
   // Use a different query if needed, or just log
+  console.log(`[EXPIRATION CHECK] Fetching rentalRecords from ${targetDb.databaseId || 'database'}...`);
   const snapshot = await targetDb.collection('rentalRecords').get();
   console.log(`[EXPIRATION CHECK] Successfully fetched ${snapshot.docs.length} rental records.`);
   
@@ -153,21 +154,29 @@ async function runCheck(targetDb: any) {
 
   for (const doc of snapshot.docs) {
     const record = doc.data();
-    if (!record.expiry || !record.email) continue;
+    if (!record.expiry || !record.email) {
+      console.log(`[EXPIRATION CHECK] Skipping document ${doc.id}: Missing expiry or email.`);
+      continue;
+    }
 
     const expiryDate = new Date(record.expiry);
+    if (isNaN(expiryDate.getTime())) {
+      console.error(`[EXPIRATION CHECK] Invalid date format for document ${doc.id}: ${record.expiry}`);
+      continue;
+    }
+
     const diffTime = expiryDate.getTime() - today.getTime();
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
 
     if (diffDays <= 60 && diffDays > 0) {
-      console.log(`[EXPIRATION CHECK] Checking record for ${record.unit}, diffDays: ${diffDays}`);
-      const lastSent = record.lastExpiryNotificationSent ? record.lastExpiryNotificationSent.toDate() : null;
+      console.log(`[EXPIRATION CHECK] Checked record ${doc.id} (${record.unit}), diffDays: ${diffDays}`);
+      const lastSent = record.lastExpiryNotificationSent ? (typeof record.lastExpiryNotificationSent.toDate === 'function' ? record.lastExpiryNotificationSent.toDate() : new Date(record.lastExpiryNotificationSent)) : null;
       const oneDayAgo = new Date();
       oneDayAgo.setDate(today.getDate() - 1);
 
       if (!lastSent || lastSent < oneDayAgo) {
         const subject = `Tenancy Expiration Reminder: ${record.unit}`;
-        const body = `Dear ${record.tenant},\n\nThis is a reminder that your tenancy for ${record.unit} is set to expire on ${record.expiry} (${diffDays} days remaining).\n\nPlease contact management to renew your tenancy or inform us of your intention to terminate the contract.\n\nBest regards,\nCrest Management`;
+        const body = `Dear ${record.tenant || 'Tenant'},\n\nThis is a reminder that your tenancy for ${record.unit} is set to expire on ${record.expiry} (${diffDays} days remaining).\n\nPlease contact management to renew your tenancy or inform us of your intention to terminate the contract.\n\nBest regards,\nCrest Management`;
 
         console.log(`[EXPIRATION CHECK] Sending reminder to ${record.email} (${diffDays} days left)`);
         
@@ -179,6 +188,7 @@ async function runCheck(targetDb: any) {
               subject: subject,
               text: body
             });
+            console.log(`[EXPIRATION CHECK] Email sent successfully to ${record.email}`);
           } else {
             console.log(`[EMAIL SIMULATION] To: ${record.email}, ${managementEmails}\nSubject: ${subject}\nBody: ${body}`);
           }
@@ -186,8 +196,8 @@ async function runCheck(targetDb: any) {
           await doc.ref.update({
             lastExpiryNotificationSent: admin.firestore.FieldValue.serverTimestamp()
           });
-        } catch (e) {
-          console.error(`[EXPIRATION CHECK] Failed to send email for ${record.unit}:`, e);
+        } catch (e: any) {
+          console.error(`[EXPIRATION CHECK] Failed to process ${record.unit}:`, e.message);
         }
       }
     }
