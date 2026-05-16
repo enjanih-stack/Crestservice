@@ -5,6 +5,8 @@ import { getFirestore } from "firebase/firestore";
 import { getStorage } from "firebase/storage";
 import firebaseConfig from '../firebase-applet-config.json';
 
+console.log("[FIREBASE] Initializing Firebase with project:", (firebaseConfig as any).projectId);
+
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
 export const analytics = typeof window !== "undefined" ? getAnalytics(app) : null;

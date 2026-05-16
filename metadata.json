@@ -1,5 +1,6 @@
 {
   "name": "Crestechnologies IS Ltd",
   "description": "Industrial-grade solutions for Facility Management, Water Hygiene, and Process Optimization.",
-  "requestFramePermissions": []
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

@@ -41,7 +41,10 @@ import {
   Star,
   Send,
   MessageSquare,
-  Info
+  Info,
+  AlertTriangle,
+  ExternalLink,
+  Play
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import Papa from 'papaparse';
@@ -84,6 +87,12 @@ import {
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { auth, db, storage } from './firebase';
 import firebaseConfig from '../firebase-applet-config.json';
+
+// Build version tracking
+if (typeof window !== 'undefined') {
+  console.log("%c BUILD VERSION ", "background: #22c55e; color: #fff; font-weight: bold-900; padding: 2px 4px; border-radius: 4px;", new Date().toISOString());
+  console.log("%c PROJECT ", "background: #3b82f6; color: #fff; font-weight: bold; padding: 2px 4px; border-radius: 4px;", (firebaseConfig as any).projectId);
+}
 
 interface Inquiry {
   id: string;
@@ -138,6 +147,13 @@ interface Inquiry {
     selfDescription: string;
     referee1: { name: string; address: string; email: string; phone: string; occupation: string; relationship: string; };
     referee2: { name: string; address: string; email: string; phone: string; occupation: string; relationship: string; };
+  };
+  waterHygieneInfo?: {
+    sourcing: string;
+    treatment: string;
+    wastewater: string;
+    results: string;
+    siteVisitCount: number;
   };
 }
 
@@ -248,7 +264,7 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
       emailVerified: auth.currentUser?.emailVerified,
       isAnonymous: auth.currentUser?.isAnonymous,
       tenantId: auth.currentUser?.tenantId,
-      providerInfo: auth.currentUser?.providerData.map(provider => ({
+      providerInfo: auth.currentUser?.providerData?.map(provider => ({
         providerId: provider.providerId,
         displayName: provider.displayName,
         email: provider.email,
@@ -258,12 +274,16 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
     operationType,
     path
   };
-  console.error('Firestore Error: ', JSON.stringify(errInfo));
-  throw new Error(JSON.stringify(errInfo));
+  console.error('Firestore Error: ', errInfo);
+  // Do NOT throw here, as it crashes the entire app in listeners
+  // Instead, return the error info so callers can decide how to handle it
+  return errInfo;
 }
 
 export default function App() {
+  console.log("[APP] Component initializing...");
   const [user, setUser] = useState<FirebaseUser | null>(null);
+  const [globalError, setGlobalError] = useState<string | null>(null);
   const [custName, setCustName] = useState('');
   const [custCompany, setCustCompany] = useState('');
   const [custLocation, setCustLocation] = useState('');
@@ -448,6 +468,8 @@ export default function App() {
         setInteractionCount(data.interactions || 0);
         setSiteVisitCount(data.siteVisits || 0);
       }
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, 'siteStats');
     });
 
     return () => unsubscribe();
@@ -462,6 +484,8 @@ export default function App() {
         ...doc.data()
       }));
       setFeedbacks(feedbackData);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'feedbacks');
     });
     return () => unsubscribe();
   }, []);
@@ -536,7 +560,11 @@ export default function App() {
       });
       setAvailableProperties(properties);
     }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, 'availableProperties');
+      const info = handleFirestoreError(error, OperationType.LIST, 'availableProperties');
+      // If it's a critical initialization error, we might want to show it
+      if (info.error.includes("permission-denied") && !user) {
+        console.warn("Public properties listener failed - likely security rules require login.");
+      }
     });
 
     // Real-time inquiries listener for admin
@@ -592,7 +620,10 @@ export default function App() {
           });
         }
       }, (error) => {
-        handleFirestoreError(error, OperationType.GET, `users/${user.uid}`);
+        const info = handleFirestoreError(error, OperationType.GET, `users/${user.uid}`);
+        if (info.error.includes("permission-denied")) {
+          console.warn("Profile listener failed - possibly restricted by security rules or user status.");
+        }
       });
     } else {
       setUserProfile(null);
@@ -1580,6 +1611,16 @@ export default function App() {
         )}
       </AnimatePresence>
 
+      {globalError && (
+        <div className="bg-red-500 text-white p-4 text-center font-bold sticky top-[73px] z-40 animate-pulse">
+          <div className="flex items-center justify-center gap-2">
+            <AlertTriangle className="w-5 h-5" />
+            <span>Connection Error: {globalError}</span>
+            <button onClick={() => window.location.reload()} className="underline ml-4">Reload</button>
+          </div>
+        </div>
+      )}
+
       {/* Advertisement Banner */}
       <div className="bg-slate-900 border-b border-slate-800">
         <AnimatePresence mode="wait">
@@ -1687,22 +1728,23 @@ export default function App() {
                 <h3 className="text-2xl font-bold mt-2 group-hover:text-blue-400 transition-colors">{service.title}</h3>
                 <p className="text-slate-400 mt-4 text-base leading-relaxed mb-6">{service.desc}</p>
                 <div className="flex flex-col gap-3">
-                  <button 
-                    onClick={() => selectService(service.title)} 
-                    className="flex items-center gap-2 text-blue-400 font-bold text-sm uppercase tracking-widest hover:text-white transition-colors"
-                  >
-                    Request Quote <ArrowRight className="w-4 h-4" />
-                  </button>
-                  {service.title === 'Property rental & Management' && (
+                  {service.title !== 'Property rental & Management' && (
                     <button 
-                      onClick={() => {
-                        selectService(service.title);
-                        setTimeout(() => setShowPropertyFinder(true), 500);
-                      }} 
+                      onClick={() => selectService(service.title)} 
+                      className="flex items-center gap-2 text-blue-400 font-bold text-sm uppercase tracking-widest hover:text-white transition-colors"
+                    >
+                      Request Quote <ArrowRight className="w-4 h-4" />
+                    </button>
+                  )}
+                  {service.title === 'Property rental & Management' && (
+                    <a 
+                      href="https://enjanih-stack.github.io/crestville-portal/"
+                      target="_blank"
+                      rel="noopener noreferrer"
                       className="flex items-center gap-2 text-green-400 font-bold text-sm uppercase tracking-widest hover:text-white transition-colors"
                     >
                       Find a Property <Search className="w-4 h-4" />
-                    </button>
+                    </a>
                   )}
                 </div>
               </motion.div>
@@ -1789,14 +1831,35 @@ export default function App() {
             initial={{ opacity: 0, y: 20 }}
             whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: true }}
-            className="aspect-video w-full rounded-3xl overflow-hidden shadow-2xl border-8 border-slate-50 bg-slate-100 relative group"
+            className="aspect-video w-full rounded-3xl overflow-hidden shadow-2xl border-8 border-slate-50 bg-slate-100 relative group flex items-center justify-center"
           >
-            <iframe 
-              src="https://drive.google.com/file/d/1uCGYQQfmX-1AhXfMO_nzLQK4RV9soBpd/preview" 
-              className="w-full h-full"
-              allow="autoplay"
-              title="Water Project Video"
-            ></iframe>
+            <div className="flex flex-col items-center gap-4 text-center p-8">
+              <div className="w-20 h-20 bg-blue-100 rounded-full flex items-center justify-center text-blue-600 mb-2">
+                <Play className="w-10 h-10 ml-1" />
+              </div>
+              <div>
+                <h3 className="text-xl font-bold text-slate-900">Project: Water Treatment Video</h3>
+                <p className="text-slate-500 max-w-md mx-auto mt-2">Due to browser security settings, please view or download the video directly from Google Drive.</p>
+              </div>
+              <div className="flex flex-wrap gap-4 justify-center mt-4">
+                <a 
+                  href="https://drive.google.com/file/d/1uCGYQQfmX-1AhXfMO_nzLQK4RV9soBpd/view?usp=sharing" 
+                  target="_blank" 
+                  rel="noopener noreferrer" 
+                  className="px-6 py-3 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 transition-all flex items-center gap-2"
+                >
+                  <ExternalLink className="w-4 h-4" /> View Video
+                </a>
+                <a 
+                  href="https://drive.google.com/uc?export=download&id=1uCGYQQfmX-1AhXfMO_nzLQK4RV9soBpd" 
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-6 py-3 bg-slate-200 text-slate-700 font-bold rounded-xl hover:bg-slate-300 transition-all flex items-center gap-2"
+                >
+                  <Download className="w-4 h-4" /> Download
+                </a>
+              </div>
+            </div>
             <div className="absolute inset-0 pointer-events-none border border-black/5 rounded-2xl"></div>
           </motion.div>
           
@@ -2005,7 +2068,7 @@ export default function App() {
                     const val = e.target.value;
                     setChosenSubService(val);
                     if (val === 'Find a Property') {
-                      setShowPropertyFinder(true);
+                      window.open('https://enjanih-stack.github.io/crestville-portal/', '_blank');
                     }
                   }}
                   className="w-full p-4 bg-gray-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all appearance-none cursor-pointer"
@@ -2031,14 +2094,15 @@ export default function App() {
                 </div>
 
                 <div className="grid md:grid-cols-3 gap-6">
-                  <button
-                    type="button"
-                    onClick={() => setShowPropertyFinder(true)}
+                  <a
+                    href="https://enjanih-stack.github.io/crestville-portal/"
+                    target="_blank"
+                    rel="noopener noreferrer"
                     className="p-6 rounded-2xl border-2 bg-blue-600 border-blue-600 text-white hover:bg-blue-700 transition-all flex flex-col items-center gap-3 shadow-lg shadow-blue-500/20"
                   >
                     <Search className="w-8 h-8" />
                     <span className="font-black uppercase tracking-widest text-center text-sm">Find a Property</span>
-                  </button>
+                  </a>
                   <button
                     type="button"
                     onClick={() => setTenantInfo({...tenantInfo, tenantType: 'New'})}
@@ -2510,7 +2574,7 @@ export default function App() {
                         <label className="text-xs font-bold text-blue-700 uppercase">What would you like to do?</label>
                         <select 
                           value={tenantInfo.oldTenantAction}
-                          onChange={(e) => setTenantInfo({...tenantInfo, oldTenantAction: e.target.value})}
+                          onChange={(e) => setTenantInfo({...tenantInfo, oldTenantAction: e.target.value as any})}
                           className="w-full p-3 bg-white border border-blue-200 rounded-xl outline-none focus:ring-2 focus:ring-blue-500"
                           required
                         >

@@ -11,14 +11,23 @@ import admin from "firebase-admin";
 import nodemailer from "nodemailer";
 import fs from "fs";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+// Path resolution that works in both ESM and CJS
+const getDirname = () => {
+  try {
+    return path.dirname(fileURLToPath(import.meta.url));
+  } catch (e) {
+    return __dirname;
+  }
+};
+
+const currentDir = getDirname();
 
 // Initialize Firebase Admin
 let db: any;
 try {
   console.log("[SERVER] Initializing Firebase Admin...");
-  const configPath = path.resolve(__dirname, "firebase-applet-config.json");
+  const configPath = path.resolve(process.cwd(), "firebase-applet-config.json");
+  console.log("[SERVER] Loading config from:", configPath);
   const firebaseConfig = JSON.parse(fs.readFileSync(configPath, "utf-8"));
   console.log("[SERVER] Config values - Project:", firebaseConfig.projectId, "Database:", firebaseConfig.firestoreDatabaseId);
 
@@ -80,11 +89,18 @@ try {
   const databaseId = firebaseConfig.firestoreDatabaseId || "(default)";
   console.log("[SERVER] Target Database ID:", databaseId);
 
-  db = getFirestore(app, databaseId);
+  try {
+    db = getFirestore(app, databaseId);
+    console.log("[SERVER] Firebase Firestore instance created.");
+  } catch (dbErr) {
+    console.error("[SERVER] Failed to get Firestore instance for ID:", databaseId, dbErr);
+    console.log("[SERVER] Falling back to default Firestore instance...");
+    db = getFirestore(app);
+  }
   
-  console.log("[SERVER] Firebase Admin initialized.");
+  console.log("[SERVER] Firebase Admin initialization sequence complete.");
 } catch (error) {
-  console.error("[SERVER] Failed to initialize Firebase Admin:", error);
+  console.error("[SERVER] Critical failure during Firebase Admin setup:", error);
 }
 
 // Global path for config to be consistent
@@ -99,46 +115,21 @@ const transporter = nodemailer.createTransport({
 });
 
 async function checkTenancyExpirations() {
-  console.log("[EXPIRATION CHECK] Starting check...");
+  console.log("[EXPIRATION CHECK] Starting scheduled check...");
   if (!db) {
-    console.error("[EXPIRATION CHECK] Global 'db' not initialized. Attempting re-init...");
-    try {
-      const configJson = fs.readFileSync(CONFIG_PATH, "utf-8");
-      const config = JSON.parse(configJson);
-      const app = getApp();
-      db = getFirestore(app, config.firestoreDatabaseId || "(default)");
-    } catch (e) {
-      console.error("[EXPIRATION CHECK] Re-init failed:", e);
-      return;
-    }
+    console.warn("[EXPIRATION CHECK] 'db' is not initialized yet. Skipping this cycle.");
+    return;
   }
   
-  let currentDb = db;
   try {
-    console.log("[EXPIRATION CHECK] Fetching rentalRecords...");
-    await runCheck(currentDb);
+    await runCheck(db);
   } catch (error: any) {
-    console.error("[EXPIRATION CHECK] Execution error:", error.message);
+    console.error("[EXPIRATION CHECK] Check failed:", error.message);
     
-    // If it's a permission error and we're not using the default DB, try the default DB as a fallback
+    // Detailed permission guidance
     if (error.message.includes("PERMISSION_DENIED")) {
-      console.log("[EXPIRATION CHECK] PERMISSION_DENIED. Checking if databaseId is the issue...");
-      try {
-        const config = JSON.parse(fs.readFileSync(CONFIG_PATH, "utf-8"));
-        if (config.firestoreDatabaseId) {
-          console.log("[EXPIRATION CHECK] Current ID is named. Trying (default) fallback...");
-          const defaultDb = getFirestore(getApp(), "(default)");
-          await runCheck(defaultDb);
-          db = defaultDb;
-          console.log("[EXPIRATION CHECK] Fallback to (default) SUCCESS.");
-        } else {
-          console.error("[EXPIRATION CHECK] PERMISSION_DENIED on (default) database.");
-          console.error("[SERVER] ACTION REQUIRED: Add 'Cloud Datastore User' role to your Service Account in Google Cloud Console.");
-        }
-      } catch (fallbackError: any) {
-        console.error("[EXPIRATION CHECK] Fallback attempt also failed:", fallbackError.message);
-        console.error("[SERVER] ACTION REQUIRED: Ensure Service Account permissions are correct for project", getApp().options.projectId);
-      }
+      console.error("[SERVER] HELP: It looks like the IAM role 'Cloud Datastore User' is missing for your service account.");
+      console.error("[SERVER] Project ID:", getApp().options.projectId);
     }
   }
 }
@@ -227,6 +218,8 @@ async function startServer() {
   // Run expiration check every 12 hours
   setInterval(checkTenancyExpirations, 12 * 60 * 60 * 1000);
 
+  console.log(`[SERVER] NODE_ENV detected as: ${process.env.NODE_ENV}`);
+
   // API routes
   app.post("/api/send-email", async (req, res) => {
     console.log("[API] Received send-email request");
@@ -269,31 +262,43 @@ async function startServer() {
     }
   } else {
     const distPath = path.resolve(process.cwd(), 'dist');
-    console.log(`[SERVER] Production mode. Serving from dist: ${distPath}`);
+    const indexPath = path.join(distPath, 'index.html');
+    
+    console.log(`[SERVER] Production mode metadata:`);
+    console.log(` - cwd: ${process.cwd()}`);
+    console.log(` - distPath: ${distPath}`);
+    console.log(` - index.html exists: ${fs.existsSync(indexPath)}`);
     
     if (fs.existsSync(distPath)) {
-      app.use(express.static(distPath));
+      app.use(express.static(distPath, {
+        index: false // we handle index.html manually below
+      }));
 
       app.get('*', (req, res) => {
-        // Skip index.html for assets
-        if (req.path.match(/\.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot|webp)$/)) {
-          return res.status(404).end();
-        }
-
+        // Log request in production for debugging blank page
+        console.log(`[SERVER] Handling request: ${req.url}`);
+        
+        // API routes fallback
         if (req.url.startsWith('/api/')) {
+          console.warn(`[SERVER] API route not found: ${req.url}`);
           return res.status(404).json({ error: 'API route not found' });
         }
-        
-        const indexPath = path.join(distPath, 'index.html');
+
+        // Send SPA entry point with no-cache headers
         if (fs.existsSync(indexPath)) {
+          res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+          res.set('Pragma', 'no-cache');
+          res.set('Expires', '0');
           res.sendFile(indexPath);
         } else {
-          res.status(500).send('Production build folder missing index.html');
+          console.error(`[SERVER] Critical Error: index.html not found at ${indexPath}`);
+          res.status(500).send('Production build missing index.html. Check build logs.');
         }
       });
     } else {
+      console.error(`[SERVER] Critical Error: 'dist' folder not found at ${distPath}`);
       app.get('*', (req, res) => {
-        res.status(500).send(`Production build folder 'dist' not found at ${distPath}`);
+        res.status(500).send(`Production build folder 'dist' not found. Please run 'npm run build'.`);
       });
     }
   }
