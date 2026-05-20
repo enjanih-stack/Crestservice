@@ -5,12 +5,16 @@ import './index.css';
 
 // Unregister any active service workers to ensure users get the latest version
 if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
-  navigator.serviceWorker.getRegistrations().then(registrations => {
-    for (const registration of registrations) {
-      registration.unregister();
-      console.log("[MAIN] Service Worker unregistered to ensure fresh content.");
-    }
-  });
+  navigator.serviceWorker.getRegistrations()
+    .then(registrations => {
+      for (const registration of registrations) {
+        registration.unregister();
+        console.log("[MAIN] Service Worker unregistered to ensure fresh content.");
+      }
+    })
+    .catch(err => {
+      console.log("[MAIN] Service worker unregistration skipped or unsupported in this sandbox environment:", err.message || err);
+    });
 }
 
 interface Props {

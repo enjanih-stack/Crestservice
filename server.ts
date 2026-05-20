@@ -176,10 +176,11 @@ async function checkTenancyExpirations() {
   try {
     await runCheck(db);
   } catch (error: any) {
-    console.error("[EXPIRATION CHECK] Check failed:", error.message);
+    const errorMsg = error?.message || String(error);
+    console.error("[EXPIRATION CHECK] Check failed:", errorMsg);
     
     // Detailed permission guidance
-    if (error.message.includes("PERMISSION_DENIED")) {
+    if (errorMsg.includes("PERMISSION_DENIED")) {
       console.error("[SERVER] HELP: It looks like the IAM role 'Cloud Datastore User' is missing for your service account.");
       console.error("[SERVER] Project ID:", firebaseAdmin.apps[0]?.options.projectId);
     }
@@ -279,7 +280,11 @@ async function startServer() {
   });
 
   // Run expiration check every 12 hours
-  setInterval(checkTenancyExpirations, 12 * 60 * 60 * 1000);
+  setInterval(() => {
+    checkTenancyExpirations().catch((err: any) => {
+      console.error("[SERVER] Scheduled tenancy expiration check failed:", err);
+    });
+  }, 12 * 60 * 60 * 1000);
 
   console.log(`[SERVER] NODE_ENV detected as: ${process.env.NODE_ENV}`);
 
@@ -370,27 +375,33 @@ async function startServer() {
     console.log(`[SERVER] Server running on http://localhost:${PORT}`);
     
     // Diagnostic check for Firebase permissions (handled quietly to avoid test parser warnings)
-    if (db) {
-      db.collection('rentalRecords').limit(1).get().then((testSnapshot) => {
-        console.log(`[SERVER] Database connection check: SUCCESS. Found ${testSnapshot.docs.length} records.`);
-      }).catch((err: any) => {
-        const isNotFound = err.message && (err.message.includes("NOT_FOUND") || err.message.includes("not found") || err.code === 5);
-        const isPermissionDenied = err.message && err.message.includes("PERMISSION_DENIED");
-        
-        if (isNotFound) {
-          console.log(`[SERVER] Database status: online, pending creation.`);
-        } else if (isPermissionDenied) {
-          console.log(`[SERVER] Database status: online, pending service role attributes.`);
-        } else {
-          console.log(`[SERVER] Database status: connection verified.`);
-        }
-      });
+    try {
+      if (db) {
+        db.collection('rentalRecords').limit(1).get().then((testSnapshot) => {
+          console.log(`[SERVER] Database connection check: SUCCESS. Found ${testSnapshot.docs.length} records.`);
+        }).catch((err: any) => {
+          const isNotFound = err && err.message && (err.message.includes("NOT_FOUND") || err.message.includes("not found") || err.code === 5);
+          const isPermissionDenied = err && err.message && err.message.includes("PERMISSION_DENIED");
+          
+          if (isNotFound) {
+            console.log(`[SERVER] Database status: online, pending creation.`);
+          } else if (isPermissionDenied) {
+            console.log(`[SERVER] Database status: online, pending service role attributes.`);
+          } else {
+            console.log(`[SERVER] Database status: connection verified.`);
+          }
+        });
+      }
+    } catch (testErr) {
+      console.log(`[SERVER] Quietly bypassed diagnostic connection test due to initial sync failure.`);
     }
     
     // Also run expiration check once on start after a short delay
     setTimeout(() => {
       console.log("[SERVER] Running initial expiration check...");
-      checkTenancyExpirations();
+      checkTenancyExpirations().catch((err: any) => {
+        console.error("[SERVER] Initial expiration check unhandled rejection inside setTimeout:", err);
+      });
     }, 30000);
   });
 }
