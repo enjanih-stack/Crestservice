@@ -1547,15 +1547,15 @@ export default function App() {
     <div className="min-h-screen bg-white text-slate-800 font-sans selection:bg-blue-100 selection:text-blue-900">
       {/* Navigation */}
       <nav className="sticky top-0 z-50 bg-white/80 backdrop-blur-md border-b border-gray-100 px-6 py-4 flex justify-between items-center shadow-sm">
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 shrink-0">
           <img src="/Logo2.png" alt="Crestechnologies Logo" className="h-10 w-auto" referrerPolicy="no-referrer" />
-          <div className="text-xl font-black text-slate-900 tracking-tighter uppercase">
+          <div className="text-lg md:text-xl font-black text-slate-900 tracking-tighter uppercase whitespace-nowrap">
             <span className="text-blue-600">CRESTECHNOLOGIES</span> <span className="text-slate-700">I S LTD</span>
           </div>
         </div>
 
         {/* Desktop Menu */}
-        <div className="hidden md:flex space-x-8 font-medium text-sm text-slate-600 uppercase tracking-widest items-center">
+        <div className="hidden lg:flex space-x-8 font-medium text-sm text-slate-600 uppercase tracking-widest items-center">
           <a href="#services" className="hover:text-blue-600 transition-colors">Services</a>
           <a href="#products" className="hover:text-blue-600 transition-colors">Products</a>
           <a href="#contact" className="hover:text-blue-600 transition-colors">Contact</a>
@@ -1574,7 +1574,7 @@ export default function App() {
         </div>
 
         {/* Mobile Menu Toggle */}
-        <button className="md:hidden text-slate-600" onClick={() => setIsMenuOpen(!isMenuOpen)}>
+        <button className="lg:hidden text-slate-600" onClick={() => setIsMenuOpen(!isMenuOpen)}>
           {isMenuOpen ? <X /> : <Menu />}
         </button>
       </nav>
@@ -1586,7 +1586,7 @@ export default function App() {
             initial={{ opacity: 0, y: -20 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -20 }}
-            className="fixed inset-x-0 top-[73px] bg-white z-40 border-b shadow-xl p-6 flex flex-col gap-4 md:hidden"
+            className="fixed inset-x-0 top-[73px] bg-white z-40 border-b shadow-xl p-6 flex flex-col gap-4 lg:hidden"
           >
             <a href="#services" onClick={() => setIsMenuOpen(false)} className="font-bold text-slate-700">Services</a>
             <a href="#products" onClick={() => setIsMenuOpen(false)} className="font-bold text-slate-700">Products</a>
@@ -3570,7 +3570,8 @@ export default function App() {
 
           <div className="pt-8 border-t border-slate-100">
             <p className="text-slate-400 text-xs uppercase tracking-widest font-bold mb-2">Engineering Excellence & Compliance</p>
-            <p className="text-slate-400 text-[10px]">© 2024 Crestechnologies I S Ltd. All rights reserved.</p>
+            <p className="text-slate-400 text-[10px]">© {new Date().getFullYear()} Crestechnologies I S Ltd. All rights reserved.</p>
+            <p className="text-slate-300 text-[9px] mt-1 font-mono uppercase">BUILD: {new Date().toISOString().replace('T', ' ').substring(0, 16)} UTC</p>
             <button 
               onClick={() => setShowRentalDashboard(true)}
               className="mt-4 text-[10px] text-slate-300 hover:text-slate-500 uppercase tracking-widest font-bold transition-colors"
