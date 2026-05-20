@@ -24,84 +24,114 @@ const currentDir = getDirname();
 
 // Initialize Firebase Admin
 let db: any;
-try {
-  console.log("[SERVER] Initializing Firebase Admin...");
-  const configPath = path.resolve(process.cwd(), "firebase-applet-config.json");
-  console.log("[SERVER] Loading config from:", configPath);
-  const firebaseConfig = JSON.parse(fs.readFileSync(configPath, "utf-8"));
-  console.log("[SERVER] Config values - Project:", firebaseConfig.projectId, "Database:", firebaseConfig.firestoreDatabaseId);
 
-  // Initialize Admin SDK
-  if (getApps().length === 0) {
-    const serviceAccountVar = process.env.FIREBASE_SERVICE_ACCOUNT;
-    
-    if (serviceAccountVar) {
-      try {
-        console.log("[SERVER] Initializing with FIREBASE_SERVICE_ACCOUNT...");
-        
-        let raw = serviceAccountVar.trim();
-        // Remove surrounding quotes if present (often added by accident in UI)
-        if ((raw.startsWith('"') && raw.endsWith('"')) || (raw.startsWith("'") && raw.endsWith("'"))) {
-          raw = raw.substring(1, raw.length - 1);
-        }
-        
-        const cleanedJson = raw.replace(/\\n/g, '\n');
-        let serviceAccount;
-        try {
-          serviceAccount = JSON.parse(cleanedJson);
-        } catch (je) {
-          // Try to handle if someone pasted a Javascript object instead of strict JSON
-          console.warn("[SERVER] Regular JSON parse failed, trying relaxed eval...");
-          // This is a bit risky but sometimes users paste things like { project_id: '...' }
-          // We'll stick to a more conservative fix for now: just log the error clearly.
-          throw je;
-        }
-        
+function initializeFirebaseAdmin(): boolean {
+  try {
+    console.log("[SERVER] Initializing Firebase Admin...");
+    let configPath = path.join(process.cwd(), "firebase-applet-config.json");
+    if (!fs.existsSync(configPath)) {
+      configPath = path.join(process.cwd(), "dist", "firebase-applet-config.json");
+    }
+
+    const hasConfig = fs.existsSync(configPath);
+    if (hasConfig) {
+      console.log("[FIREBASE INIT] Using config file");
+    } else {
+      console.log("[FIREBASE INIT] Using FIREBASE_SERVICE_ACCOUNT env var");
+    }
+
+    const serviceAccount = fs.existsSync(configPath)
+      ? JSON.parse(fs.readFileSync(configPath, 'utf8'))
+      : JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT || '{}');
+
+    // Extract basic options for fallback projectId / databaseId
+    const targetProjectId = serviceAccount.projectId || serviceAccount.project_id || process.env.FIREBASE_PROJECT_ID;
+    const targetDatabaseId = serviceAccount.firestoreDatabaseId || process.env.FIREBASE_DATABASE_ID || "(default)";
+
+    console.log("[SERVER] Target Project:", targetProjectId, "Target Database ID:", targetDatabaseId);
+
+    // Initialize Admin SDK
+    if (getApps().length === 0) {
+      const serviceAccountVar = process.env.FIREBASE_SERVICE_ACCOUNT;
+      
+      if (serviceAccount.private_key && serviceAccount.client_email) {
+        console.log("[SERVER] Initializing with direct Service Account credentials.");
         initializeApp({
           credential: admin.credential.cert(serviceAccount),
-          projectId: serviceAccount.project_id || firebaseConfig.projectId
+          projectId: targetProjectId
         });
-        console.log("[SERVER] Initialized with Service Account. Project:", serviceAccount.project_id);
-      } catch (parseErr: any) {
-        console.error("[SERVER] Failed to parse FIREBASE_SERVICE_ACCOUNT JSON. Error:", parseErr.message);
-        console.error("[SERVER] Ensure the environment variable contains valid JSON from your Service Account Key file.");
-        // Fallback to basic init
-        initializeApp({ projectId: firebaseConfig.projectId });
+        console.log("[FIREBASE INIT SUCCESS] Fully initialized Firebase Admin SDK using Service Account Key.");
+      } else if (serviceAccountVar) {
+        let envServiceAccount;
+        try {
+          envServiceAccount = JSON.parse(serviceAccountVar);
+        } catch (je) {
+          try {
+            let raw = serviceAccountVar.trim();
+            if ((raw.startsWith('"') && raw.endsWith('"')) || (raw.startsWith("'") && raw.endsWith("'"))) {
+              raw = raw.substring(1, raw.length - 1);
+            }
+            const cleanedJson = raw.replace(/\\n/g, '\n');
+            envServiceAccount = JSON.parse(cleanedJson);
+          } catch (cleanErr: any) {
+            console.error("[SERVER] Failed to parse FIREBASE_SERVICE_ACCOUNT environment variable:", cleanErr.message);
+          }
+        }
+
+        if (envServiceAccount && envServiceAccount.private_key) {
+          initializeApp({
+            credential: admin.credential.cert(envServiceAccount),
+            projectId: envServiceAccount.project_id || targetProjectId
+          });
+          console.log("[FIREBASE INIT SUCCESS] Fully initialized Firebase Admin SDK using environment Service Account.");
+        } else {
+          initializeApp({
+            projectId: targetProjectId
+          });
+          console.log("[FIREBASE INIT SUCCESS] Initialized using default credentials as environment service account is not parsed fully.");
+        }
+      } else {
+        // Fallback to basic projectId initialization
+        if (targetProjectId) {
+          initializeApp({
+            projectId: targetProjectId
+          });
+          console.log("[FIREBASE INIT SUCCESS] Initialized using config projectId (no service account).");
+        } else {
+          initializeApp();
+          console.log("[FIREBASE INIT SUCCESS] Initialized using default ambient system credentials.");
+        }
       }
     } else {
-      try {
-        console.log("[SERVER] No FIREBASE_SERVICE_ACCOUNT found. Using project default credentials.");
-        console.log("[SERVER] Attempting initialization with config projectId:", firebaseConfig.projectId);
-        initializeApp({
-          projectId: firebaseConfig.projectId
-        });
-      } catch (initErr) {
-        console.warn("[SERVER] Failed to initialize with config projectId, falling back to ambient default:", initErr);
-        initializeApp();
-      }
+      console.log("[SERVER] Firebase app already exists.");
     }
-  }
-  
-  const app = getApp();
-  console.log("[SERVER] Active App Project ID:", app.options.projectId);
+    
+    const app = getApp();
+    console.log("[SERVER] Active App Project ID:", app.options.projectId);
 
-  // Determine database ID
-  const databaseId = firebaseConfig.firestoreDatabaseId || "(default)";
-  console.log("[SERVER] Target Database ID:", databaseId);
+    // Determine database ID
+    console.log("[SERVER] Target Database ID:", targetDatabaseId);
 
-  try {
-    db = getFirestore(app, databaseId);
-    console.log("[SERVER] Firebase Firestore instance created.");
-  } catch (dbErr) {
-    console.error("[SERVER] Failed to get Firestore instance for ID:", databaseId, dbErr);
-    console.log("[SERVER] Falling back to default Firestore instance...");
-    db = getFirestore(app);
+    try {
+      db = getFirestore(app, targetDatabaseId);
+      console.log("[SERVER] Firebase Firestore instance created.");
+    } catch (dbErr) {
+      console.error("[SERVER] Failed to get Firestore instance for ID:", targetDatabaseId, dbErr);
+      console.log("[SERVER] Falling back to default Firestore instance...");
+      db = getFirestore(app);
+    }
+    
+    console.log("[SERVER] Firebase Admin initialization sequence complete.");
+    return true;
+  } catch (error: any) {
+    console.error("[SERVER] Critical failure during Firebase Admin setup:", error);
+    console.log(`[FIREBASE INIT FAILED: ${error.message || error}]`);
+    return false;
   }
-  
-  console.log("[SERVER] Firebase Admin initialization sequence complete.");
-} catch (error) {
-  console.error("[SERVER] Critical failure during Firebase Admin setup:", error);
 }
+
+// Perform initial execution on startup
+initializeFirebaseAdmin();
 
 // Global path for config to be consistent
 const CONFIG_PATH = path.resolve(process.cwd(), "firebase-applet-config.json");
@@ -116,9 +146,13 @@ const transporter = nodemailer.createTransport({
 
 async function checkTenancyExpirations() {
   console.log("[EXPIRATION CHECK] Starting scheduled check...");
-  if (!db) {
-    console.warn("[EXPIRATION CHECK] 'db' is not initialized yet. Skipping this cycle.");
-    return;
+  if (!db || getApps().length === 0) {
+    console.warn("[EXPIRATION CHECK] Firebase Admin is not initialized yet. Retrying initialization...");
+    const success = initializeFirebaseAdmin();
+    if (!success || !db) {
+      console.error("[EXPIRATION CHECK] Failed to initialize Firebase Admin during check on demand. Skipping this cycle.");
+      return;
+    }
   }
   
   try {
@@ -324,7 +358,7 @@ async function startServer() {
     setTimeout(() => {
       console.log("[SERVER] Running initial expiration check...");
       checkTenancyExpirations();
-    }, 10000);
+    }, 30000);
   });
 }
 
