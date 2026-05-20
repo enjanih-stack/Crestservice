@@ -5,11 +5,9 @@ import { fileURLToPath } from "url";
 import "dotenv/config";
 
 console.log("[SERVER] server.ts is being executed...");
-import { initializeApp, getApps, getApp } from "firebase-admin/app";
-import { getFirestore } from "firebase-admin/firestore";
-import admin from "firebase-admin";
+import * as admin from "firebase-admin";
 import nodemailer from "nodemailer";
-import fs from "fs";
+import * as fs from "fs";
 
 // Path resolution that works in both ESM and CJS
 const getDirname = () => {
@@ -23,115 +21,41 @@ const getDirname = () => {
 const currentDir = getDirname();
 
 // Initialize Firebase Admin
-let db: any;
+let db: admin.firestore.Firestore | null = null;
 
-function initializeFirebaseAdmin(): boolean {
+function initFirebaseAdmin() {
   try {
-    console.log("[SERVER] Initializing Firebase Admin...");
-    let configPath = path.join(process.cwd(), "firebase-applet-config.json");
-    if (!fs.existsSync(configPath)) {
-      configPath = path.join(process.cwd(), "dist", "firebase-applet-config.json");
+    if (admin.apps.length > 0) {
+      db = admin.firestore();
+      console.log('[FIREBASE INIT] Already initialized — reusing existing app');
+      return;
     }
-
-    const hasConfig = fs.existsSync(configPath);
-    if (hasConfig) {
-      console.log("[FIREBASE INIT] Using config file");
+    let serviceAccount;
+    const configPaths = [
+      path.join(process.cwd(), "firebase-applet-config.json"),
+      path.join(process.cwd(), "dist", "firebase-applet-config.json"),
+      path.join(currentDir, "..", "firebase-applet-config.json"),
+    ];
+    const foundPath = configPaths.find(p => fs.existsSync(p));
+    if (foundPath) {
+      serviceAccount = JSON.parse(fs.readFileSync(foundPath, 'utf8'));
+      console.log('[FIREBASE INIT] Using config file:', foundPath);
+    } else if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+      serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+      console.log('[FIREBASE INIT] Using FIREBASE_SERVICE_ACCOUNT env var');
     } else {
-      console.log("[FIREBASE INIT] Using FIREBASE_SERVICE_ACCOUNT env var");
+      throw new Error('No Firebase credentials found — set FIREBASE_SERVICE_ACCOUNT env var');
     }
-
-    const serviceAccount = fs.existsSync(configPath)
-      ? JSON.parse(fs.readFileSync(configPath, 'utf8'))
-      : JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT || '{}');
-
-    // Extract basic options for fallback projectId / databaseId
-    const targetProjectId = serviceAccount.projectId || serviceAccount.project_id || process.env.FIREBASE_PROJECT_ID;
-    const targetDatabaseId = serviceAccount.firestoreDatabaseId || process.env.FIREBASE_DATABASE_ID || "(default)";
-
-    console.log("[SERVER] Target Project:", targetProjectId, "Target Database ID:", targetDatabaseId);
-
-    // Initialize Admin SDK
-    if (getApps().length === 0) {
-      const serviceAccountVar = process.env.FIREBASE_SERVICE_ACCOUNT;
-      
-      if (serviceAccount.private_key && serviceAccount.client_email) {
-        console.log("[SERVER] Initializing with direct Service Account credentials.");
-        initializeApp({
-          credential: admin.credential.cert(serviceAccount),
-          projectId: targetProjectId
-        });
-        console.log("[FIREBASE INIT SUCCESS] Fully initialized Firebase Admin SDK using Service Account Key.");
-      } else if (serviceAccountVar) {
-        let envServiceAccount;
-        try {
-          envServiceAccount = JSON.parse(serviceAccountVar);
-        } catch (je) {
-          try {
-            let raw = serviceAccountVar.trim();
-            if ((raw.startsWith('"') && raw.endsWith('"')) || (raw.startsWith("'") && raw.endsWith("'"))) {
-              raw = raw.substring(1, raw.length - 1);
-            }
-            const cleanedJson = raw.replace(/\\n/g, '\n');
-            envServiceAccount = JSON.parse(cleanedJson);
-          } catch (cleanErr: any) {
-            console.error("[SERVER] Failed to parse FIREBASE_SERVICE_ACCOUNT environment variable:", cleanErr.message);
-          }
-        }
-
-        if (envServiceAccount && envServiceAccount.private_key) {
-          initializeApp({
-            credential: admin.credential.cert(envServiceAccount),
-            projectId: envServiceAccount.project_id || targetProjectId
-          });
-          console.log("[FIREBASE INIT SUCCESS] Fully initialized Firebase Admin SDK using environment Service Account.");
-        } else {
-          initializeApp({
-            projectId: targetProjectId
-          });
-          console.log("[FIREBASE INIT SUCCESS] Initialized using default credentials as environment service account is not parsed fully.");
-        }
-      } else {
-        // Fallback to basic projectId initialization
-        if (targetProjectId) {
-          initializeApp({
-            projectId: targetProjectId
-          });
-          console.log("[FIREBASE INIT SUCCESS] Initialized using config projectId (no service account).");
-        } else {
-          initializeApp();
-          console.log("[FIREBASE INIT SUCCESS] Initialized using default ambient system credentials.");
-        }
-      }
-    } else {
-      console.log("[SERVER] Firebase app already exists.");
-    }
-    
-    const app = getApp();
-    console.log("[SERVER] Active App Project ID:", app.options.projectId);
-
-    // Determine database ID
-    console.log("[SERVER] Target Database ID:", targetDatabaseId);
-
-    try {
-      db = getFirestore(app, targetDatabaseId);
-      console.log("[SERVER] Firebase Firestore instance created.");
-    } catch (dbErr) {
-      console.error("[SERVER] Failed to get Firestore instance for ID:", targetDatabaseId, dbErr);
-      console.log("[SERVER] Falling back to default Firestore instance...");
-      db = getFirestore(app);
-    }
-    
-    console.log("[SERVER] Firebase Admin initialization sequence complete.");
-    return true;
-  } catch (error: any) {
-    console.error("[SERVER] Critical failure during Firebase Admin setup:", error);
-    console.log(`[FIREBASE INIT FAILED: ${error.message || error}]`);
-    return false;
+    admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
+    db = admin.firestore();
+    console.log('[FIREBASE INIT] ✓ Success — Firestore connected');
+  } catch (err) {
+    console.error('[FIREBASE INIT] ✗ Failed:', err);
+    db = null;
   }
 }
 
-// Perform initial execution on startup
-initializeFirebaseAdmin();
+initFirebaseAdmin();
 
 // Global path for config to be consistent
 const CONFIG_PATH = path.resolve(process.cwd(), "firebase-applet-config.json");
@@ -145,14 +69,14 @@ const transporter = nodemailer.createTransport({
 });
 
 async function checkTenancyExpirations() {
-  console.log("[EXPIRATION CHECK] Starting scheduled check...");
-  if (!db || getApps().length === 0) {
-    console.warn("[EXPIRATION CHECK] Firebase Admin is not initialized yet. Retrying initialization...");
-    const success = initializeFirebaseAdmin();
-    if (!success || !db) {
-      console.error("[EXPIRATION CHECK] Failed to initialize Firebase Admin during check on demand. Skipping this cycle.");
-      return;
-    }
+  console.log('[EXPIRATION CHECK] Starting check...');
+  if (!db) {
+    console.log('[EXPIRATION CHECK] db not initialized — attempting init...');
+    initFirebaseAdmin();
+  }
+  if (!db) {
+    console.error('[EXPIRATION CHECK] ✗ Cannot proceed — Firebase unavailable');
+    return;
   }
   
   try {
@@ -163,7 +87,7 @@ async function checkTenancyExpirations() {
     // Detailed permission guidance
     if (error.message.includes("PERMISSION_DENIED")) {
       console.error("[SERVER] HELP: It looks like the IAM role 'Cloud Datastore User' is missing for your service account.");
-      console.error("[SERVER] Project ID:", getApp().options.projectId);
+      console.error("[SERVER] Project ID:", admin.apps[0]?.options.projectId);
     }
   }
 }
@@ -243,7 +167,7 @@ async function startServer() {
       env: process.env.NODE_ENV,
       time: new Date().toISOString(),
       firebase: {
-        project: getApp()?.options.projectId,
+        project: admin.apps[0]?.options.projectId,
         dbInitialized: !!db
       }
     });
