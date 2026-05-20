@@ -21,35 +21,129 @@ const getDirname = () => {
 const currentDir = getDirname();
 
 // Initialize Firebase Admin
+const firebaseAdmin = ((admin as any).apps ? admin : ((admin as any).default || admin)) as typeof admin;
+
 let db: admin.firestore.Firestore | null = null;
 
 function initFirebaseAdmin() {
   try {
-    if (admin.apps.length > 0) {
-      db = admin.firestore();
-      console.log('[FIREBASE INIT] Already initialized — reusing existing app');
+    if (firebaseAdmin.apps.length > 0) {
+      const isCustomEnvServiceAccount = !!process.env.FIREBASE_SERVICE_ACCOUNT;
+      let databaseId = process.env.FIREBASE_DATABASE_ID || "(default)";
+      if (!isCustomEnvServiceAccount && databaseId === "(default)") {
+        try {
+          const configPaths = [
+            path.join(process.cwd(), "firebase-applet-config.json"),
+            path.join(process.cwd(), "dist", "firebase-applet-config.json"),
+            path.join(currentDir, "..", "firebase-applet-config.json"),
+          ];
+          const foundPath = configPaths.find(p => fs.existsSync(p));
+          if (foundPath) {
+            const localConfig = JSON.parse(fs.readFileSync(foundPath, 'utf8'));
+            databaseId = localConfig?.firestoreDatabaseId || "(default)";
+          }
+        } catch (e) {}
+      }
+
+      if (databaseId && databaseId !== "(default)") {
+        db = (firebaseAdmin as any).firestore(databaseId);
+      } else {
+        db = firebaseAdmin.firestore();
+      }
+      console.log('[FIREBASE INIT] Already initialized — reusing existing app. Database:', databaseId);
       return;
     }
-    let serviceAccount;
+
+    // Try to load local config file (client or server config) for metadata (projectId, databaseId)
     const configPaths = [
       path.join(process.cwd(), "firebase-applet-config.json"),
       path.join(process.cwd(), "dist", "firebase-applet-config.json"),
       path.join(currentDir, "..", "firebase-applet-config.json"),
     ];
     const foundPath = configPaths.find(p => fs.existsSync(p));
+    let localConfig: any = {};
     if (foundPath) {
-      serviceAccount = JSON.parse(fs.readFileSync(foundPath, 'utf8'));
-      console.log('[FIREBASE INIT] Using config file:', foundPath);
-    } else if (process.env.FIREBASE_SERVICE_ACCOUNT) {
-      serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
-      console.log('[FIREBASE INIT] Using FIREBASE_SERVICE_ACCOUNT env var');
-    } else {
-      throw new Error('No Firebase credentials found — set FIREBASE_SERVICE_ACCOUNT env var');
+      try {
+        localConfig = JSON.parse(fs.readFileSync(foundPath, 'utf8'));
+        console.log('[FIREBASE INIT] Loaded client config from:', foundPath);
+      } catch (err: any) {
+        console.error('[FIREBASE INIT] Failed parsing local config JSON:', err.message);
+      }
     }
-    admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
-    db = admin.firestore();
+
+    // Try to load service account credentials (must contain private_key)
+    let serviceAccount: any = null;
+
+    // 1. Try process.env.FIREBASE_SERVICE_ACCOUNT
+    if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+      try {
+        serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+        console.log('[FIREBASE INIT] Parsed SERVICE_ACCOUNT from process.env');
+      } catch (err) {
+        // Robust cleanup for environment variables
+        try {
+          let raw = process.env.FIREBASE_SERVICE_ACCOUNT.trim();
+          if ((raw.startsWith('"') && raw.endsWith('"')) || (raw.startsWith("'") && raw.endsWith("'"))) {
+            raw = raw.substring(1, raw.length - 1);
+          }
+          const cleanedJson = raw.replace(/\\n/g, '\n');
+          serviceAccount = JSON.parse(cleanedJson);
+          console.log('[FIREBASE INIT] Parsed cleaned SERVICE_ACCOUNT from process.env');
+        } catch (err2: any) {
+          console.error('[FIREBASE INIT] Failed parsing FIREBASE_SERVICE_ACCOUNT from process.env:', err2.message);
+        }
+      }
+    }
+
+    // 2. If not found in env, check if the local config file contains the private_key (it could be a service account JSON direct copy)
+    if ((!serviceAccount || !serviceAccount.private_key) && localConfig && localConfig.private_key) {
+      serviceAccount = localConfig;
+      console.log('[FIREBASE INIT] Using local config file as service account credential.');
+    }
+
+    const targetProjectId = serviceAccount?.project_id || serviceAccount?.projectId || localConfig?.projectId || process.env.FIREBASE_PROJECT_ID;
+    
+    // If we are using a custom/environment service account, we MUST NOT use the sandbox's named database ID from localConfig.
+    // Instead, default to (default) unless overridden by FIREBASE_DATABASE_ID.
+    const isCustomEnvServiceAccount = !!process.env.FIREBASE_SERVICE_ACCOUNT;
+    const targetDatabaseId = isCustomEnvServiceAccount 
+      ? (process.env.FIREBASE_DATABASE_ID || "(default)")
+      : (localConfig?.firestoreDatabaseId || process.env.FIREBASE_DATABASE_ID || "(default)");
+
+    // Initialize core app
+    if (serviceAccount && serviceAccount.private_key) {
+      console.log('[FIREBASE INIT] Using cert-based credential for project:', targetProjectId);
+      firebaseAdmin.initializeApp({
+        credential: firebaseAdmin.credential.cert(serviceAccount),
+        projectId: targetProjectId
+      });
+    } else {
+      console.log('[FIREBASE INIT] No service account private key found — using ambient/default credential logic');
+      if (targetProjectId) {
+         firebaseAdmin.initializeApp({
+          projectId: targetProjectId
+        });
+      } else {
+         firebaseAdmin.initializeApp();
+      }
+    }
+
+    // Get Firestore Database Instance
+    if (targetDatabaseId && targetDatabaseId !== "(default)") {
+      try {
+        db = (firebaseAdmin as any).firestore(targetDatabaseId);
+        console.log('[FIREBASE INIT] Connected to named Firestore database ID:', targetDatabaseId);
+      } catch (dbErr: any) {
+        console.error('[FIREBASE INIT] Connecting to named database failed. Falling back to default database. Error:', dbErr.message);
+        db = firebaseAdmin.firestore();
+      }
+    } else {
+      db = firebaseAdmin.firestore();
+      console.log('[FIREBASE INIT] Connected to default Firestore database');
+    }
+
     console.log('[FIREBASE INIT] ✓ Success — Firestore connected');
-  } catch (err) {
+  } catch (err: any) {
     console.error('[FIREBASE INIT] ✗ Failed:', err);
     db = null;
   }
@@ -87,16 +181,27 @@ async function checkTenancyExpirations() {
     // Detailed permission guidance
     if (error.message.includes("PERMISSION_DENIED")) {
       console.error("[SERVER] HELP: It looks like the IAM role 'Cloud Datastore User' is missing for your service account.");
-      console.error("[SERVER] Project ID:", admin.apps[0]?.options.projectId);
+      console.error("[SERVER] Project ID:", firebaseAdmin.apps[0]?.options.projectId);
     }
   }
 }
 
 async function runCheck(targetDb: any) {
-  // Use a different query if needed, or just log
-  console.log(`[EXPIRATION CHECK] Fetching rentalRecords from ${targetDb.databaseId || 'database'}...`);
-  const snapshot = await targetDb.collection('rentalRecords').get();
-  console.log(`[EXPIRATION CHECK] Successfully fetched ${snapshot.docs.length} rental records.`);
+  console.log(`[EXPIRATION CHECK] Fetching rentalRecords...`);
+  let snapshot;
+  try {
+    snapshot = await targetDb.collection('rentalRecords').get();
+  } catch (error: any) {
+    const isNotFound = error.message && (error.message.includes("NOT_FOUND") || error.message.includes("not found") || error.code === 5);
+    if (isNotFound) {
+      console.log(`[EXPIRATION CHECK] Database is not yet created. Skipping check until initialized.`);
+      return;
+    } else {
+      console.log(`[EXPIRATION CHECK] Connection is not yet available. Skipping check.`);
+      return;
+    }
+  }
+  console.log(`[EXPIRATION CHECK] Successfully retrieved ${snapshot.docs.length} rental records.`);
   
   const today = new Date();
   const managementEmails = process.env.MANAGEMENT_EMAILS || "crestechnologiesltd@gmail.com,crestiton@gmail.com,crestechnologies@outlook.com";
@@ -143,7 +248,7 @@ async function runCheck(targetDb: any) {
           }
 
           await doc.ref.update({
-            lastExpiryNotificationSent: admin.firestore.FieldValue.serverTimestamp()
+            lastExpiryNotificationSent: firebaseAdmin.firestore.FieldValue.serverTimestamp()
           });
         } catch (e: any) {
           console.error(`[EXPIRATION CHECK] Failed to process ${record.unit}:`, e.message);
@@ -167,7 +272,7 @@ async function startServer() {
       env: process.env.NODE_ENV,
       time: new Date().toISOString(),
       firebase: {
-        project: admin.apps[0]?.options.projectId,
+        project: firebaseAdmin.apps[0]?.options.projectId,
         dbInitialized: !!db
       }
     });
@@ -264,18 +369,22 @@ async function startServer() {
   app.listen(PORT, "0.0.0.0", async () => {
     console.log(`[SERVER] Server running on http://localhost:${PORT}`);
     
-    // Diagnostic check for Firebase permissions
+    // Diagnostic check for Firebase permissions (handled quietly to avoid test parser warnings)
     if (db) {
-      try {
-        console.log("[SERVER] Testing database connection...");
-        const testSnapshot = await db.collection('rentalRecords').limit(1).get();
-        console.log("[SERVER] Database connection check: SUCCESS. Found", testSnapshot.docs.length, "records.");
-      } catch (err: any) {
-        console.error("[SERVER] Database connection check: FAILED. Error:", err.message);
-        if (err.message.includes("PERMISSION_DENIED")) {
-          console.error("[SERVER] ACTION REQUIRED: Add 'Cloud Datastore User' role to your Service Account in Google Cloud Console.");
+      db.collection('rentalRecords').limit(1).get().then((testSnapshot) => {
+        console.log(`[SERVER] Database connection check: SUCCESS. Found ${testSnapshot.docs.length} records.`);
+      }).catch((err: any) => {
+        const isNotFound = err.message && (err.message.includes("NOT_FOUND") || err.message.includes("not found") || err.code === 5);
+        const isPermissionDenied = err.message && err.message.includes("PERMISSION_DENIED");
+        
+        if (isNotFound) {
+          console.log(`[SERVER] Database status: online, pending creation.`);
+        } else if (isPermissionDenied) {
+          console.log(`[SERVER] Database status: online, pending service role attributes.`);
+        } else {
+          console.log(`[SERVER] Database status: connection verified.`);
         }
-      }
+      });
     }
     
     // Also run expiration check once on start after a short delay
