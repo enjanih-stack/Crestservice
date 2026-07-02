@@ -8,7 +8,9 @@ if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
   navigator.serviceWorker.getRegistrations()
     .then(registrations => {
       for (const registration of registrations) {
-        registration.unregister();
+        registration.unregister().catch(err => {
+          console.log("[MAIN] Individual unregistration failed:", err);
+        });
         console.log("[MAIN] Service Worker unregistered to ensure fresh content.");
       }
     })

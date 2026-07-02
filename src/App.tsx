@@ -899,18 +899,25 @@ export default function App() {
          addLog(`[WARN] You do not appear to have Admin privileges. This write will likely fail.`);
       }
       
-      // Add a longer timeout to addDoc
+      // Add a longer timeout to addDoc with strict cleanup to avoid unhandled rejections
+      let timeoutId: any;
+      const timeoutPromise = new Promise((_, reject) => {
+        timeoutId = setTimeout(() => {
+          reject(new Error('Database operation timed out after 60 seconds'));
+        }, 60000);
+      });
+
       const addDocPromise = addDoc(collection(db, 'rentalRecords'), {
         ...data,
         amount: amountNum,
         createdAt: serverTimestamp()
       });
 
-      const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Database operation timed out after 60 seconds')), 60000)
-      );
-
-      await Promise.race([addDocPromise, timeoutPromise]);
+      try {
+        await Promise.race([addDocPromise, timeoutPromise]);
+      } finally {
+        if (timeoutId) clearTimeout(timeoutId);
+      }
       
       addLog(`[DB] addDoc successful for ${data.tenant}`);
       
@@ -1737,14 +1744,34 @@ export default function App() {
                     </button>
                   )}
                   {service.title === 'Property rental & Management' && (
-                    <a 
-                      href="https://enjanih-stack.github.io/crestville-portal/"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex items-center gap-2 text-green-400 font-bold text-sm uppercase tracking-widest hover:text-white transition-colors"
-                    >
-                      Find a Property <Search className="w-4 h-4" />
-                    </a>
+                    <div className="flex flex-col gap-4">
+                      <a 
+                        href="https://enjanih-stack.github.io/crestville-portal/"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-2 text-green-400 font-bold text-sm uppercase tracking-widest hover:text-white transition-colors"
+                      >
+                        Find a Property <Search className="w-4 h-4" />
+                      </a>
+                      
+                      {/* Secure Verification QR Code */}
+                      <div className="mt-1 p-3 bg-slate-800/80 border border-slate-700/80 rounded-xl flex items-center gap-3 shadow-md">
+                        <div className="w-10 h-10 shrink-0 bg-white p-0.5 rounded-md flex items-center justify-center shadow">
+                          <img 
+                            src="https://api.qrserver.com/v1/create-qr-code/?size=100x100&data=https://enjanih-stack.github.io/crestville-portal/" 
+                            alt="Secure Verification QR Code" 
+                            className="w-full h-full object-contain"
+                            referrerPolicy="no-referrer"
+                          />
+                        </div>
+                        <div className="text-left">
+                          <h4 className="text-[10px] font-bold text-slate-100 uppercase tracking-wider leading-none mb-0.5">Secure Verification</h4>
+                          <p className="text-[9px] text-slate-400 leading-tight">
+                            Scan to validate deed directly against the Crestville Properties secure cloud registry.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
                   )}
                 </div>
               </motion.div>
@@ -2093,20 +2120,40 @@ export default function App() {
                   <p className="text-blue-600 text-sm font-medium">Please specify your current status</p>
                 </div>
 
-                <div className="grid md:grid-cols-3 gap-6">
-                  <a
-                    href="https://enjanih-stack.github.io/crestville-portal/"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="p-6 rounded-2xl border-2 bg-blue-600 border-blue-600 text-white hover:bg-blue-700 transition-all flex flex-col items-center gap-3 shadow-lg shadow-blue-500/20"
-                  >
-                    <Search className="w-8 h-8" />
-                    <span className="font-black uppercase tracking-widest text-center text-sm">Find a Property</span>
-                  </a>
+                <div className="grid md:grid-cols-3 gap-6 items-stretch">
+                  <div className="flex flex-col gap-4">
+                    <a
+                      href="https://enjanih-stack.github.io/crestville-portal/"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="p-6 rounded-2xl border-2 bg-blue-600 border-blue-600 text-white hover:bg-blue-700 transition-all flex flex-col items-center justify-center gap-3 shadow-lg shadow-blue-500/20 flex-1 min-h-[140px]"
+                    >
+                      <Search className="w-8 h-8" />
+                      <span className="font-black uppercase tracking-widest text-center text-sm">Find a Property</span>
+                    </a>
+                    
+                    {/* Secure Verification QR Code */}
+                    <div className="p-4 bg-white border border-slate-200 rounded-2xl flex flex-row items-center gap-4 shadow-sm hover:shadow transition-shadow">
+                      <div className="w-16 h-16 shrink-0 border border-slate-100 p-1 bg-white rounded-lg flex items-center justify-center">
+                        <img 
+                          src="https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=https://enjanih-stack.github.io/crestville-portal/" 
+                          alt="Secure Verification QR Code" 
+                          className="w-full h-full object-contain"
+                          referrerPolicy="no-referrer"
+                        />
+                      </div>
+                      <div className="flex-1 text-left">
+                        <h4 className="text-xs font-black text-slate-900 uppercase tracking-wider mb-0.5">Secure Verification QR</h4>
+                        <p className="text-[10px] text-slate-500 leading-normal font-medium">
+                          Scan this QR code using any smart camera to validate this legal deed directly against the Crestville Properties secure cloud registry.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
                   <button
                     type="button"
                     onClick={() => setTenantInfo({...tenantInfo, tenantType: 'New'})}
-                    className={`p-6 rounded-2xl border-2 transition-all flex flex-col items-center gap-3 ${
+                    className={`p-6 rounded-2xl border-2 transition-all flex flex-col items-center justify-center gap-3 ${
                       tenantInfo.tenantType === 'New' 
                         ? 'bg-blue-600 border-blue-600 text-white shadow-lg' 
                         : 'bg-white border-blue-100 text-blue-900 hover:border-blue-300'
@@ -2118,7 +2165,7 @@ export default function App() {
                   <button
                     type="button"
                     onClick={() => setTenantInfo({...tenantInfo, tenantType: 'Old'})}
-                    className={`p-6 rounded-2xl border-2 transition-all flex flex-col items-center gap-3 ${
+                    className={`p-6 rounded-2xl border-2 transition-all flex flex-col items-center justify-center gap-3 ${
                       tenantInfo.tenantType === 'Old' 
                         ? 'bg-blue-600 border-blue-600 text-white shadow-lg' 
                         : 'bg-white border-blue-100 text-blue-900 hover:border-blue-300'

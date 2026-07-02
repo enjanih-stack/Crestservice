@@ -5,6 +5,15 @@ import { fileURLToPath } from "url";
 import "dotenv/config";
 
 console.log("[SERVER] server.ts is being executed...");
+
+// Global handlers for process robustness
+process.on("unhandledRejection", (reason, promise) => {
+  console.log("[SERVER] Handled global unhandledRejection:", reason);
+});
+
+process.on("uncaughtException", (error) => {
+  console.log("[SERVER] Handled global uncaughtException:", error);
+});
 import * as admin from "firebase-admin";
 import nodemailer from "nodemailer";
 import * as fs from "fs";
