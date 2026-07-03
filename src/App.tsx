@@ -1682,13 +1682,35 @@ export default function App() {
           <p className="text-xl md:text-2xl text-slate-200 mb-10 leading-relaxed max-w-2xl mx-auto">
             Industrial-grade solutions for Facility Management, Water Hygiene, and Process Optimization.
           </p>
-          <div className="flex flex-col sm:flex-row gap-4 justify-center">
+          <div className="flex flex-col sm:flex-row gap-6 justify-center items-center">
             <a 
               href="#services" 
               className="bg-blue-600 px-10 py-4 rounded-full font-bold text-lg hover:bg-blue-700 transition-all shadow-xl hover:scale-105"
             >
               Our Services
             </a>
+
+            {/* Finding Property QR Code */}
+            <a 
+              href="https://enjanih-stack.github.io/crestville-portal/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex flex-col items-center bg-white/10 backdrop-blur-md border border-white/20 p-3 rounded-2xl shadow-xl hover:bg-white/15 transition-all max-w-[160px] hover:scale-105"
+              title="Finding Property"
+            >
+              <div className="w-24 h-24 bg-white p-1 rounded-xl flex items-center justify-center shadow-inner">
+                <img 
+                  src="https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=https://enjanih-stack.github.io/crestville-portal/" 
+                  alt="Finding Property QR Code" 
+                  className="w-full h-full object-contain"
+                  referrerPolicy="no-referrer"
+                />
+              </div>
+              <span className="text-white font-bold text-xs mt-2 uppercase tracking-widest text-center whitespace-nowrap">
+                Finding Property
+              </span>
+            </a>
+
             <a 
               href="#inquiry" 
               className="bg-white/10 backdrop-blur-md border border-white/20 px-10 py-4 rounded-full font-bold text-lg hover:bg-white/20 transition-all"
